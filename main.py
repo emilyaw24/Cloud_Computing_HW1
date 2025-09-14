@@ -4,14 +4,14 @@ import os
 import socket
 from datetime import datetime
 from typing import Dict, List, Optional
-from uuid import UUID
+from uuid import UUID, uuid4
 
 from fastapi import FastAPI, HTTPException, Query, Path
 
 from models.person import PersonCreate, PersonRead, PersonUpdate
 from models.address import AddressCreate, AddressRead, AddressUpdate
-from models.my_course import CourseCreate, CourseRead, CourseUpdate
-from models.my_enrollment import EnrollmentCreate, EnrollmentRead, EnrollmentUpdate
+from models.movie import MovieCreate, MovieRead, MovieUpdate
+from models.crew_member import CrewMemberCreate, CrewMemberRead, CrewMemberUpdate
 from models.health import Health
 
 port = int(os.environ.get("FASTAPIPORT", 8000))
@@ -21,30 +21,32 @@ port = int(os.environ.get("FASTAPIPORT", 8000))
 # -----------------------------------------------------------------------------
 persons: Dict[UUID, PersonRead] = {}
 addresses: Dict[UUID, AddressRead] = {}
-courses: Dict[UUID, CourseRead] = {}
-enrollments: Dict[UUID, EnrollmentRead] = {}
+movies: Dict[UUID, MovieRead] = {}
+crew_members: Dict[UUID, CrewMemberRead] = {}
 
 app = FastAPI(
-    title="University API",
-    description="Demo FastAPI app using Pydantic v2 models for Person, Address, Course, and Enrollment",
-    version="0.3.0",
+    title="Movie API",
+    description="Demo FastAPI app using Pydantic v2 models for Person, Address, Movie, and Crew Member",
+    version="0.1.0",
 )
 
 # -----------------------------------------------------------------------------
-# Health endpoints
+# Address endpoints
 # -----------------------------------------------------------------------------
-def make_health(echo: Optional[str], path_echo: Optional[str] = None) -> Health:
+
+def make_health(echo: Optional[str], path_echo: Optional[str]=None) -> Health:
     return Health(
         status=200,
         status_message="OK",
         timestamp=datetime.utcnow().isoformat() + "Z",
         ip_address=socket.gethostbyname(socket.gethostname()),
         echo=echo,
-        path_echo=path_echo,
+        path_echo=path_echo
     )
 
 @app.get("/health", response_model=Health)
 def get_health_no_path(echo: str | None = Query(None, description="Optional echo string")):
+    # Works because path_echo is optional in the model
     return make_health(echo=echo, path_echo=None)
 
 @app.get("/health/{path_echo}", response_model=Health)
@@ -54,9 +56,6 @@ def get_health_with_path(
 ):
     return make_health(echo=echo, path_echo=path_echo)
 
-# -----------------------------------------------------------------------------
-# Address endpoints
-# -----------------------------------------------------------------------------
 @app.post("/addresses", response_model=AddressRead, status_code=201)
 def create_address(address: AddressCreate):
     if address.id in addresses:
@@ -107,6 +106,7 @@ def update_address(address_id: UUID, update: AddressUpdate):
 # -----------------------------------------------------------------------------
 @app.post("/persons", response_model=PersonRead, status_code=201)
 def create_person(person: PersonCreate):
+    # Each person gets its own UUID; stored as PersonRead
     person_read = PersonRead(**person.model_dump())
     persons[person_read.id] = person_read
     return person_read
@@ -137,6 +137,7 @@ def list_persons(
     if birth_date is not None:
         results = [p for p in results if str(p.birth_date) == birth_date]
 
+    # nested address filtering
     if city is not None:
         results = [p for p in results if any(addr.city == city for addr in p.addresses)]
     if country is not None:
@@ -160,125 +161,106 @@ def update_person(person_id: UUID, update: PersonUpdate):
     return persons[person_id]
 
 # -----------------------------------------------------------------------------
-# Course endpoints
+# Movie endpoints
 # -----------------------------------------------------------------------------
-@app.post("/courses", response_model=CourseRead, status_code=201)
-def create_course(course: CourseCreate):
-    course_read = CourseRead(**course.model_dump())
-    if course_read.id in courses:
-        raise HTTPException(status_code=400, detail="Course with this ID already exists")
-    courses[course_read.id] = course_read
-    return course_read
+@app.post("/movies", response_model=MovieRead, status_code=201)
+def create_movie(movie: MovieCreate):
+    movie_read = MovieRead(**movie.model_dump())
+    if movie_read.id in movies:
+        raise HTTPException(status_code=400, detail="Movie with this ID already exists")
+    movies[movie_read.id] = movie_read
+    return movie_read
 
-@app.get("/courses", response_model=List[CourseRead])
-def list_courses(
-    code: Optional[str] = Query(None, description="Filter by course code"),
-    title: Optional[str] = Query(None, description="Filter by course title"),
-    instructor: Optional[str] = Query(None, description="Filter by instructor name"),
-):
-    results = list(courses.values())
-
-    if code is not None:
-        results = [c for c in results if c.code == code]
-    if title is not None:
-        results = [c for c in results if c.title == title]
-    if instructor is not None:
-        results = [c for c in results if c.instructor == instructor]
-
+@app.get("/movies", response_model=List[MovieRead])
+def list_movies(title: Optional[str] = Query(None)):
+    results = list(movies.values())
+    if title:
+        results = [m for m in results if m.title == title]
     return results
 
-@app.get("/courses/{course_id}", response_model=CourseRead)
-def get_course(course_id: UUID):
-    if course_id not in courses:
-        raise HTTPException(status_code=404, detail="Course not found")
-    return courses[course_id]
+@app.get("/movies/{movie_id}", response_model=MovieRead)
+def get_movie(movie_id: UUID):
+    if movie_id not in movies:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    return movies[movie_id]
 
-@app.put("/courses/{course_id}", response_model=CourseRead)
-def replace_course(course_id: UUID, new_course: CourseCreate):
-    if course_id not in courses:
-        raise HTTPException(status_code=404, detail="Course not found")
-    courses[course_id] = CourseRead(**new_course.model_dump())
-    return courses[course_id]
+@app.put("/movies/{movie_id}", response_model=MovieRead)
+def replace_movie(movie_id: UUID, new_movie: MovieCreate):
+    if movie_id not in movies:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    movies[movie_id] = MovieRead(**new_movie.model_dump(), id=movie_id)
+    return movies[movie_id]
 
-@app.patch("/courses/{course_id}", response_model=CourseRead)
-def update_course(course_id: UUID, update: CourseUpdate):
-    if course_id not in courses:
-        raise HTTPException(status_code=404, detail="Course not found")
-    stored = courses[course_id].model_dump()
+@app.patch("/movies/{movie_id}", response_model=MovieRead)
+def update_movie(movie_id: UUID, update: MovieUpdate):
+    if movie_id not in movies:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    stored = movies[movie_id].model_dump()
     stored.update(update.model_dump(exclude_unset=True))
-    courses[course_id] = CourseRead(**stored)
-    return courses[course_id]
+    movies[movie_id] = MovieRead(**stored)
+    return movies[movie_id]
 
-@app.delete("/courses/{course_id}", status_code=204)
-def delete_course(course_id: UUID):
-    if course_id not in courses:
-        raise HTTPException(status_code=404, detail="Course not found")
-    del courses[course_id]
+@app.delete("/movies/{movie_id}", status_code=204)
+def delete_movie(movie_id: UUID):
+    if movie_id not in movies:
+        raise HTTPException(status_code=404, detail="Movie not found")
+    del movies[movie_id]
     return None
 
 # -----------------------------------------------------------------------------
-# Enrollment endpoints
+# Crew Member endpoints
 # -----------------------------------------------------------------------------
-@app.post("/enrollments", response_model=EnrollmentRead, status_code=201)
-def create_enrollment(enrollment: EnrollmentCreate):
-    enrollment_read = EnrollmentRead(**enrollment.model_dump())
-    if enrollment_read.id in enrollments:
-        raise HTTPException(status_code=400, detail="Enrollment with this ID already exists")
-    enrollments[enrollment_read.id] = enrollment_read
-    return enrollment_read
+@app.post("/crew_members", response_model=CrewMemberRead, status_code=201)
+def create_crew_member(crew_member: CrewMemberCreate):
+    crew_read = CrewMemberRead(**crew_member.model_dump())
+    if crew_read.id in crew_members:
+        raise HTTPException(status_code=400, detail="Crew Member with this ID already exists")
+    crew_members[crew_read.id] = crew_read
+    return crew_read
 
-@app.get("/enrollments", response_model=List[EnrollmentRead])
-def list_enrollments(
-    person_id: Optional[UUID] = Query(None, description="Filter by person ID"),
-    course_id: Optional[UUID] = Query(None, description="Filter by course ID"),
-    grade: Optional[str] = Query(None, description="Filter by grade"),
-):
-    results = list(enrollments.values())
-
-    if person_id is not None:
-        results = [e for e in results if e.person_id == person_id]
-    if course_id is not None:
-        results = [e for e in results if e.course_id == course_id]
-    if grade is not None:
-        results = [e for e in results if e.grade == grade]
-
+@app.get("/crew_members", response_model=List[CrewMemberRead])
+def list_crew_members(name: Optional[str] = Query(None)):
+    results = list(crew_members.values())
+    if name:
+        results = [c for c in results if c.name == name]
     return results
 
-@app.get("/enrollments/{enrollment_id}", response_model=EnrollmentRead)
-def get_enrollment(enrollment_id: UUID):
-    if enrollment_id not in enrollments:
-        raise HTTPException(status_code=404, detail="Enrollment not found")
-    return enrollments[enrollment_id]
+@app.get("/crew_members/{crew_id}", response_model=CrewMemberRead)
+def get_crew_member(crew_id: UUID):
+    if crew_id not in crew_members:
+        raise HTTPException(status_code=404, detail="Crew Member not found")
+    return crew_members[crew_id]
 
-@app.put("/enrollments/{enrollment_id}", response_model=EnrollmentRead)
-def replace_enrollment(enrollment_id: UUID, new_enrollment: EnrollmentCreate):
-    if enrollment_id not in enrollments:
-        raise HTTPException(status_code=404, detail="Enrollment not found")
-    enrollments[enrollment_id] = EnrollmentRead(**new_enrollment.model_dump())
-    return enrollments[enrollment_id]
+@app.put("/crew_members/{crew_id}", response_model=CrewMemberRead)
+def replace_crew_member(crew_id: UUID, new_crew: CrewMemberCreate):
+    if crew_id not in crew_members:
+        raise HTTPException(status_code=404, detail="Crew Member not found")
+    crew_members[crew_id] = CrewMemberRead(**new_crew.model_dump(), id=crew_id)
+    return crew_members[crew_id]
 
-@app.patch("/enrollments/{enrollment_id}", response_model=EnrollmentRead)
-def update_enrollment(enrollment_id: UUID, update: EnrollmentUpdate):
-    if enrollment_id not in enrollments:
-        raise HTTPException(status_code=404, detail="Enrollment not found")
-    stored = enrollments[enrollment_id].model_dump()
+@app.patch("/crew_members/{crew_id}", response_model=CrewMemberRead)
+def update_crew_member(crew_id: UUID, update: CrewMemberUpdate):
+    if crew_id not in crew_members:
+        raise HTTPException(status_code=404, detail="Crew Member not found")
+    stored = crew_members[crew_id].model_dump()
     stored.update(update.model_dump(exclude_unset=True))
-    enrollments[enrollment_id] = EnrollmentRead(**stored)
-    return enrollments[enrollment_id]
+    crew_members[crew_id] = CrewMemberRead(**stored)
+    return crew_members[crew_id]
 
-@app.delete("/enrollments/{enrollment_id}", status_code=204)
-def delete_enrollment(enrollment_id: UUID):
-    if enrollment_id not in enrollments:
-        raise HTTPException(status_code=404, detail="Enrollment not found")
-    del enrollments[enrollment_id]
+@app.delete("/crew_members/{crew_id}", status_code=204)
+def delete_crew_member(crew_id: UUID):
+    if crew_id not in crew_members:
+        raise HTTPException(status_code=404, detail="Crew Member not found")
+    del crew_members[crew_id]
     return None
+
 
 # -----------------------------------------------------------------------------
 # Root
 # -----------------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"message": "Welcome to the University API. See /docs for OpenAPI UI."}
+    return {"message": "Welcome to the Movie API. See /docs for OpenAPI UI."}
 
 # -----------------------------------------------------------------------------
 # Entrypoint for `python main.py`

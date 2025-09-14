@@ -3,15 +3,16 @@ from __future__ import annotations
 import os
 import socket
 from datetime import datetime
-from typing import Dict, List, Optional
+
+from typing import Dict, List
 from uuid import UUID
 
-from fastapi import FastAPI, HTTPException, Query, Path
+from fastapi import FastAPI, HTTPException
+from fastapi import Query, Path
+from typing import Optional
 
 from models.person import PersonCreate, PersonRead, PersonUpdate
 from models.address import AddressCreate, AddressRead, AddressUpdate
-from models.my_course import CourseCreate, CourseRead, CourseUpdate
-from models.my_enrollment import EnrollmentCreate, EnrollmentRead, EnrollmentUpdate
 from models.health import Health
 
 port = int(os.environ.get("FASTAPIPORT", 8000))
@@ -21,30 +22,30 @@ port = int(os.environ.get("FASTAPIPORT", 8000))
 # -----------------------------------------------------------------------------
 persons: Dict[UUID, PersonRead] = {}
 addresses: Dict[UUID, AddressRead] = {}
-courses: Dict[UUID, CourseRead] = {}
-enrollments: Dict[UUID, EnrollmentRead] = {}
 
 app = FastAPI(
-    title="University API",
-    description="Demo FastAPI app using Pydantic v2 models for Person, Address, Course, and Enrollment",
-    version="0.3.0",
+    title="Person/Address API",
+    description="Demo FastAPI app using Pydantic v2 models for Person and Address",
+    version="0.1.0",
 )
 
 # -----------------------------------------------------------------------------
-# Health endpoints
+# Address endpoints
 # -----------------------------------------------------------------------------
-def make_health(echo: Optional[str], path_echo: Optional[str] = None) -> Health:
+
+def make_health(echo: Optional[str], path_echo: Optional[str]=None) -> Health:
     return Health(
         status=200,
         status_message="OK",
         timestamp=datetime.utcnow().isoformat() + "Z",
         ip_address=socket.gethostbyname(socket.gethostname()),
         echo=echo,
-        path_echo=path_echo,
+        path_echo=path_echo
     )
 
 @app.get("/health", response_model=Health)
 def get_health_no_path(echo: str | None = Query(None, description="Optional echo string")):
+    # Works because path_echo is optional in the model
     return make_health(echo=echo, path_echo=None)
 
 @app.get("/health/{path_echo}", response_model=Health)
@@ -54,9 +55,6 @@ def get_health_with_path(
 ):
     return make_health(echo=echo, path_echo=path_echo)
 
-# -----------------------------------------------------------------------------
-# Address endpoints
-# -----------------------------------------------------------------------------
 @app.post("/addresses", response_model=AddressRead, status_code=201)
 def create_address(address: AddressCreate):
     if address.id in addresses:
@@ -107,6 +105,7 @@ def update_address(address_id: UUID, update: AddressUpdate):
 # -----------------------------------------------------------------------------
 @app.post("/persons", response_model=PersonRead, status_code=201)
 def create_person(person: PersonCreate):
+    # Each person gets its own UUID; stored as PersonRead
     person_read = PersonRead(**person.model_dump())
     persons[person_read.id] = person_read
     return person_read
@@ -137,6 +136,7 @@ def list_persons(
     if birth_date is not None:
         results = [p for p in results if str(p.birth_date) == birth_date]
 
+    # nested address filtering
     if city is not None:
         results = [p for p in results if any(addr.city == city for addr in p.addresses)]
     if country is not None:
@@ -160,129 +160,16 @@ def update_person(person_id: UUID, update: PersonUpdate):
     return persons[person_id]
 
 # -----------------------------------------------------------------------------
-# Course endpoints
-# -----------------------------------------------------------------------------
-@app.post("/courses", response_model=CourseRead, status_code=201)
-def create_course(course: CourseCreate):
-    course_read = CourseRead(**course.model_dump())
-    if course_read.id in courses:
-        raise HTTPException(status_code=400, detail="Course with this ID already exists")
-    courses[course_read.id] = course_read
-    return course_read
-
-@app.get("/courses", response_model=List[CourseRead])
-def list_courses(
-    code: Optional[str] = Query(None, description="Filter by course code"),
-    title: Optional[str] = Query(None, description="Filter by course title"),
-    instructor: Optional[str] = Query(None, description="Filter by instructor name"),
-):
-    results = list(courses.values())
-
-    if code is not None:
-        results = [c for c in results if c.code == code]
-    if title is not None:
-        results = [c for c in results if c.title == title]
-    if instructor is not None:
-        results = [c for c in results if c.instructor == instructor]
-
-    return results
-
-@app.get("/courses/{course_id}", response_model=CourseRead)
-def get_course(course_id: UUID):
-    if course_id not in courses:
-        raise HTTPException(status_code=404, detail="Course not found")
-    return courses[course_id]
-
-@app.put("/courses/{course_id}", response_model=CourseRead)
-def replace_course(course_id: UUID, new_course: CourseCreate):
-    if course_id not in courses:
-        raise HTTPException(status_code=404, detail="Course not found")
-    courses[course_id] = CourseRead(**new_course.model_dump())
-    return courses[course_id]
-
-@app.patch("/courses/{course_id}", response_model=CourseRead)
-def update_course(course_id: UUID, update: CourseUpdate):
-    if course_id not in courses:
-        raise HTTPException(status_code=404, detail="Course not found")
-    stored = courses[course_id].model_dump()
-    stored.update(update.model_dump(exclude_unset=True))
-    courses[course_id] = CourseRead(**stored)
-    return courses[course_id]
-
-@app.delete("/courses/{course_id}", status_code=204)
-def delete_course(course_id: UUID):
-    if course_id not in courses:
-        raise HTTPException(status_code=404, detail="Course not found")
-    del courses[course_id]
-    return None
-
-# -----------------------------------------------------------------------------
-# Enrollment endpoints
-# -----------------------------------------------------------------------------
-@app.post("/enrollments", response_model=EnrollmentRead, status_code=201)
-def create_enrollment(enrollment: EnrollmentCreate):
-    enrollment_read = EnrollmentRead(**enrollment.model_dump())
-    if enrollment_read.id in enrollments:
-        raise HTTPException(status_code=400, detail="Enrollment with this ID already exists")
-    enrollments[enrollment_read.id] = enrollment_read
-    return enrollment_read
-
-@app.get("/enrollments", response_model=List[EnrollmentRead])
-def list_enrollments(
-    person_id: Optional[UUID] = Query(None, description="Filter by person ID"),
-    course_id: Optional[UUID] = Query(None, description="Filter by course ID"),
-    grade: Optional[str] = Query(None, description="Filter by grade"),
-):
-    results = list(enrollments.values())
-
-    if person_id is not None:
-        results = [e for e in results if e.person_id == person_id]
-    if course_id is not None:
-        results = [e for e in results if e.course_id == course_id]
-    if grade is not None:
-        results = [e for e in results if e.grade == grade]
-
-    return results
-
-@app.get("/enrollments/{enrollment_id}", response_model=EnrollmentRead)
-def get_enrollment(enrollment_id: UUID):
-    if enrollment_id not in enrollments:
-        raise HTTPException(status_code=404, detail="Enrollment not found")
-    return enrollments[enrollment_id]
-
-@app.put("/enrollments/{enrollment_id}", response_model=EnrollmentRead)
-def replace_enrollment(enrollment_id: UUID, new_enrollment: EnrollmentCreate):
-    if enrollment_id not in enrollments:
-        raise HTTPException(status_code=404, detail="Enrollment not found")
-    enrollments[enrollment_id] = EnrollmentRead(**new_enrollment.model_dump())
-    return enrollments[enrollment_id]
-
-@app.patch("/enrollments/{enrollment_id}", response_model=EnrollmentRead)
-def update_enrollment(enrollment_id: UUID, update: EnrollmentUpdate):
-    if enrollment_id not in enrollments:
-        raise HTTPException(status_code=404, detail="Enrollment not found")
-    stored = enrollments[enrollment_id].model_dump()
-    stored.update(update.model_dump(exclude_unset=True))
-    enrollments[enrollment_id] = EnrollmentRead(**stored)
-    return enrollments[enrollment_id]
-
-@app.delete("/enrollments/{enrollment_id}", status_code=204)
-def delete_enrollment(enrollment_id: UUID):
-    if enrollment_id not in enrollments:
-        raise HTTPException(status_code=404, detail="Enrollment not found")
-    del enrollments[enrollment_id]
-    return None
-
-# -----------------------------------------------------------------------------
 # Root
 # -----------------------------------------------------------------------------
 @app.get("/")
 def root():
-    return {"message": "Welcome to the University API. See /docs for OpenAPI UI."}
+    return {"message": "Welcome to the Person/Address API. See /docs for OpenAPI UI."}
 
 # -----------------------------------------------------------------------------
 # Entrypoint for `python main.py`
 # -----------------------------------------------------------------------------
 if __name__ == "__main__":
     import uvicorn
+
     uvicorn.run("main:app", host="0.0.0.0", port=port, reload=True)
